@@ -31,6 +31,7 @@ TFocusNFeCommunicator = class
     function getReceiveDir: string;
     procedure baixarArquivos(chave: string);
     function cancelarNota(ref: string): boolean;
+    function emitirCartaCorrecao(ref: string): boolean;
   public
     class procedure startProcess;
     constructor create;
@@ -150,6 +151,24 @@ begin
 
     FindResult := FindNext(SearchRec);
   end;
+
+  FindResult := FindFirst(sendDir + '*.cce', faAnyFile - faDirectory, SearchRec);
+  while FindResult = 0 do
+  begin
+    nomeArquivo := sendDir + SearchRec.Name;
+    ref := copy(SearchRec.Name, 1, length(SearchRec.Name) - 4);
+    log(tlEvento, 'Processando arquivo ' + quotedStr(nomeArquivo));
+    if emitirCartaCorrecao(ref) then
+    begin
+      nomeArquivoDestino := getArquivosProcessadosDir + ExtractFileName(nomeArquivo);
+      if not moveFile(Pchar(nomeArquivo), PChar(nomeArquivoDestino)) then
+        log(tlErro, 'Impossível mover arquivo para processados: ' + nomeArquivo);
+      //criaArquivoPendenciaRetorno(ref);
+    end;
+
+    FindResult := FindNext(SearchRec);
+  end;
+
 end;
 
 procedure TFocusNFeCommunicator.processFilesToReceive;
@@ -415,6 +434,34 @@ begin
   end;
 end;
 
+function TFocusNFeCommunicator.emitirCartaCorrecao(ref: string): boolean;
+var
+  motivo, urlReq: string;
+  response: TStringStream;
+  arq: TStringList;
+begin
+  result := false;
+  arq := TStringList.Create;
+  response := TStringStream.Create('');
+  try try
+    arq.LoadFromFile(getSendDir + ref + '.can');
+    motivo := trim(arq.GetText);
+    urlReq := trim(url + '/nfe2/carta_correcao?token=' + token +
+      '&ref=' + ref + '&justificativa=' + AnsiReplaceStr(motivo, ' ', '+'));
+    HTTPClient.Get(urlReq, response);
+    log(tlAviso, 'Retorno do cancelamento: ' + response.DataString);
+    result := true;
+  except
+    on e: EIdHTTPProtocolException do
+      log(tlErro, e.ErrorMessage);
+    on e: Exception do
+      log(tlErro, e.Message);
+  end;
+  finally
+    FreeAndNil(response);
+    freeAndNil(arq);
+  end;
+end;
 
 
 end.
