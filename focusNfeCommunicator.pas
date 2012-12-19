@@ -4,7 +4,7 @@ interface
 
 uses
 
-  Forms, iniFiles, Classes, sysUtils, Dialogs, windows, IdHTTP;
+  iniFiles, Classes, sysUtils, windows, IdHTTP;
 
 type
 
@@ -54,8 +54,6 @@ uses StrUtils;
 
 
 class procedure TFocusNFeCommunicator.startProcess;
-var
-  inicio, fim1, fim2: cardinal;
 begin
   with TFocusNFeCommunicator.create do
   begin
@@ -189,7 +187,7 @@ end;
 
 function TFocusNFeCommunicator.getBaseDir: string;
 begin
-  result := IncludeTrailingPathDelimiter(ExtractFileDir(Application.ExeName));
+  result := IncludeTrailingPathDelimiter(ExtractFileDir(ParamStr(0)));
 end;
 
 function TFocusNFeCommunicator.getPendenciaRetornoDir: string;
@@ -334,7 +332,7 @@ begin
   urlReq := url + '/nfe2/consultar?token=' + token + '&ref=' + ref;
   res := TStringList.Create;
   try
-    res.Text := Utf8ToAnsi(HTTPClient.Get(urlReq));
+    res.Text := HTTPClient.Get(urlReq);
     res.SaveToFile(receiveDir + ref + '.ret');
     log(tlAviso, 'Salvo arquivo de retorno: ' + QuotedStr(receiveDir + ref + '.ret'));
     for i := 1 to res.Count -1 do

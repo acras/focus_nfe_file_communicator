@@ -3,8 +3,7 @@ program focusNfeFileCommunicator;
 {$APPTYPE CONSOLE}
 
 uses
-  Windows, dialogs,
-  focusNfeCommunicator in 'focusNfeCommunicator.pas';
+  Windows, focusNfeCommunicator in 'focusNfeCommunicator.pas';
 
 var
   mutex: THandle;
