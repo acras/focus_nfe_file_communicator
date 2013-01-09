@@ -1,1 +1,8 @@
 *~pas
+__history
+focusFin.ini
+arquivosProcessados
+*.dcu
+*.exe
+logs
+retornos

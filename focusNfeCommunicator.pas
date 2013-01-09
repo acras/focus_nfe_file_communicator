@@ -32,11 +32,14 @@ TFocusNFeCommunicator = class
     procedure baixarArquivos(chave: string);
     function cancelarNota(ref: string): boolean;
     function emitirCartaCorrecao(ref: string): boolean;
+    procedure DownloadArquivo(path, dirLocal, nomeArq: String);
   public
     class procedure startProcess;
     constructor create;
   private
     HTTPClient: TIdHTTP;
+    procedure consultarRetornoCCe(ref: string);
+    procedure criaArquivoPendenciaRetornoCCe(ref: string);
     property sendDir: string read getSendDir write FsendDir;
     property logDir: string read FlogDir write FlogDir;
     property receiveDir: string read getReceiveDir write FreceiveDir;
@@ -183,6 +186,14 @@ begin
     consultarRetorno(copy(SearchRec.Name, 0, length(SearchRec.Name) - 4));
     FindResult := FindNext(SearchRec);
   end;
+  FindResult := FindFirst(getPendenciaRetornoDir + '*.cce', faAnyFile - faDirectory, SearchRec);
+  while FindResult = 0 do
+  begin
+    nomeArquivo := getPendenciaRetornoDir + SearchRec.Name;
+    log(tlEvento, 'Consultando retorno cce ' + quotedStr(nomeArquivo));
+    consultarRetornoCCe(copy(SearchRec.Name, 0, length(SearchRec.Name) - 4));
+    FindResult := FindNext(SearchRec);
+  end;
 end;
 
 function TFocusNFeCommunicator.getBaseDir: string;
@@ -218,6 +229,7 @@ begin
   ensureDir(receiveDir);
   ensureDir(receiveDir + 'DANFEs');
   ensureDir(receiveDir + 'XMLs');
+  ensureDir(receiveDir + 'CCes');
   ensureDir(logDir);
   ensureDir(getPendenciaRetornoDir);
   ensureDir(getArquivosProcessadosDir);
@@ -269,6 +281,15 @@ begin
   with TStringList.create do
   begin
     SaveToFile(getPendenciaRetornoDir + ref + '.ref');
+    free;
+  end;
+end;
+
+procedure TFocusNFeCommunicator.criaArquivoPendenciaRetornoCCe(ref: string);
+begin
+  with TStringList.create do
+  begin
+    SaveToFile(getPendenciaRetornoDir + ref + '.cce');
     free;
   end;
 end;
@@ -376,32 +397,28 @@ begin
 end;
 
 procedure TFocusNFeCommunicator.baixarArquivos(chave: string);
-var
-  fileName: string;
-  fileStream: TMemoryStream;
 begin
-  //DANFE
-  fileName := getReceiveDir + 'DANFEs\' + chave + '.pdf';
+  DownloadArquivo(url + '/notas_fiscais/' + trim(chave) + '.pdf',
+    'DANFEs\', chave + '.pdf');
+  DownloadArquivo('/notas_fiscais/' + trim(chave) + '.xml',
+    'XMLs\', chave + '.xml');
+end;
 
+procedure TFocusNFeCommunicator.DownloadArquivo(path, dirLocal, nomeArq: String);
+var
+  fileStream: TMemoryStream;
+  fileName: string;
+begin
+  fileName := getReceiveDir + dirLocal + nomeArq;
   fileStream := TMemoryStream.Create;
   try
-    HTTPClient.Get(url + '/notas_fiscais/' + trim(chave) + '.pdf', fileStream);
-    fileStream.SaveToFile(fileName);
-  finally
-    fileStream.free;
-  end;
-
-  //XML
-  fileName := getReceiveDir + 'XMLs\' + chave + '.xml';
-
-  fileStream := TMemoryStream.Create;
-  try
-    HTTPClient.Get(url + '/notas_fiscais/' + trim(chave) + '.xml', fileStream);
+    HTTPClient.Get(path, fileStream);
     fileStream.SaveToFile(fileName);
   finally
     fileStream.free;
   end;
 end;
+
 
 function TFocusNFeCommunicator.cancelarNota(ref: string): boolean;
 var
@@ -442,12 +459,14 @@ begin
   arq := TStringList.Create;
   response := TStringStream.Create('');
   try try
-    arq.LoadFromFile(getSendDir + ref + '.can');
+    arq.LoadFromFile(getSendDir + ref + '.cce');
     motivo := trim(arq.GetText);
-    urlReq := trim(url + '/nfe2/carta_correcao?token=' + token +
-      '&ref=' + ref + '&justificativa=' + AnsiReplaceStr(motivo, ' ', '+'));
+    urlReq := trim(url + '/nfe2/emitir_cce?ref=' + ref +
+      '&correcao=' + AnsiReplaceStr(motivo, ' ', '+') +
+      '&token=' + token);
     HTTPClient.Get(urlReq, response);
-    log(tlAviso, 'Retorno do cancelamento: ' + response.DataString);
+    log(tlAviso, 'Retorno da cce: ' + response.DataString);
+    criaArquivoPendenciaRetornoCCe(ref);
     result := true;
   except
     on e: EIdHTTPProtocolException do
@@ -458,6 +477,56 @@ begin
   finally
     FreeAndNil(response);
     freeAndNil(arq);
+  end;
+end;
+
+
+procedure TFocusNFeCommunicator.consultarRetornoCCe(ref: string);
+var
+  urlReq, chave, chaveNFe, seq, valor, urlXML, mensagemStatus, urlPDF: string;
+  res: TStringList;
+  i, separatorPosition: integer;
+  final: boolean;
+begin
+  //final será a flag indicando que a resposta é final, autorizado ou não autorizado, com isso
+  //  podemos apagar o arquivo da pendência de consulta
+  final := false;
+
+  urlReq := url + '/nfe2/consultar_cce?token=' + token + '&ref=' + ref;
+  res := TStringList.Create;
+  try
+    res.Text := HTTPClient.Get(urlReq);
+    res.SaveToFile(receiveDir + ref + '.ret');
+    log(tlAviso, 'Salvo arquivo de retorno: ' + QuotedStr(receiveDir + ref + '.ret'));
+    for i := 1 to res.Count -1 do
+    begin
+      separatorPosition := pos(':', res[i]);
+      chave := Trim(copy(res[i], 1, separatorPosition - 1));
+      valor := Trim(copy(res[i], separatorPosition + 1, MaxInt));
+
+      if chave = 'status' then
+        mensagemStatus := valor;
+      if chave = 'caminho_pdf' then
+        urlPDF := valor;
+      if chave = 'caminho_xml' then
+        urlXML := valor;
+      if chave = 'numero_sequencial_evento' then
+        seq := valor;
+      if chave = 'chave_nfe' then
+        chaveNFe := valor;
+    end;
+    if mensagemStatus = 'autorizado' then
+    begin
+      log(tlAviso, 'A CCe foi autorizada com sucesso: ' + ref);
+      DownloadArquivo(urlPDF, 'CCes\', 'CCe' + chaveNFe + '.' + seq + '.pdf');
+      DownloadArquivo(urlXML, 'CCes\', 'CCe' + chaveNFe + '.' + seq + '.xml');
+      final := true;
+    end;
+
+    if final then
+      DeleteFile(PChar(getPendenciaRetornoDir + ref + '.cce'));
+  finally
+    FreeAndNil(res);
   end;
 end;
 
